@@ -2,12 +2,24 @@
 
 [![Clojars Project](https://img.shields.io/clojars/v/migrana.svg)](https://clojars.org/migrana)
 
-Migrana is a Datomic migration tool loosely inspired on a mix of the
+Migrana is a Datomic migration tool loosely inspired on a mix of
 [conformity](https://github.com/rkneufeld/conformity) and
 [Rails' Active Record Migrations](http://edgeguides.rubyonrails.org/active_record_migrations.html).
 
 Migrana gives you the control over how your Datomic database evolves. It allows you to either write
 migrations and ensure that they run once and only once or let Migrana infer schema evolution to you.
+
+## Motivation
+
+Datomic and its immutable nature simplifies migrations tremendously. However, every now and again,
+a few things need to be fixed along the way. Two common scenarios are:
+
+1. When schema changes are not trivial and you end up needing to deal with alterations that are not
+   directly possible without a few interventions beforehand (see
+   [Altering Schema Attributes](http://docs.datomic.com/schema.html#altering-schema-attributes) for
+   more details.)
+2. When there are data transformation needs as part of the migration (say that now all entities that
+   used to have `:card/ratings` now also need a default `:card/has-been-rated?` attributed).
 
 ## Table of Contents
 
@@ -56,7 +68,6 @@ you at `resources/migrations` with the timestamp `YYYYMMDDHHMMSS_schema_inferenc
 ```
 $ ls resources/migrations
 20171124200143_schema_inference.edn
-$
 ```
 
 If you run `lein migrana` again, Migrana will not do anything because it will detect that the schema file
@@ -111,7 +122,6 @@ And let's check what Migrana has done to our `resources/migrations`:
 ```
 $ ls resources/migrations
 20171124200143_schema_inference.edn 20171124200525_schema_inference.edn
-$
 ```
 
 When you check the content of the new file (`20171124200525_schema_inference.edn`),
@@ -149,7 +159,6 @@ This will create the migration `YYYYMMDDHHMMSS_retract_name.edn` in the `resourc
 ```
 $ ls resources/migrations
 20171124200143_schema_inference.edn 20171124200525_schema_inference.edn 20171124200733_retract_name.edn`
-$
 ```
 
 The file will be empty and you can write your own migration steps in as a vector of the `:tx-data` map entry.
@@ -193,6 +202,8 @@ Then in your `src/my_project/migrations.clj` you could have:
                     :some/bar :bar-value})]
     tx-data))
 ```
+
+After you edit the file, you can run `lein migrana` as usual and your migration will be sent to the DB.
 
 ## Bugs
 
