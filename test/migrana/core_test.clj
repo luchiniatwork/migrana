@@ -1,6 +1,6 @@
-(ns migrana2.core-test
+(ns migrana.core-test
   (:require [clojure.test :refer :all]
-            [migrana2.core :refer :all]))
+            [migrana.core :refer :all]))
 
 (deftest a-test
   (testing "FIXME, I fail."

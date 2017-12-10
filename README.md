@@ -224,11 +224,25 @@ migration will be sent to the DB.
 
 ## Options
 
+$ lein migrana run <uri>
+
+-s --schema
 TBD: how to specify other edn than resources/schema.edn?
+
+-m --migrations
 TBD: how to specify a different folder than resources/migrations? - is this
 a good idea?
-TBD: param to forcefully set the DB to some version and/or re-execute a set
+
+--no-inference
 TBD: param to run without schema inference
+
+
+$ lein migrana set-db <uri> <timestamp>
+
+
+$ lein migrana create <name>
+
+
 
 ## Bugs
 
