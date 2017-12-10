@@ -4,24 +4,26 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
-  :dependencies [[org.clojure/clojure "1.8.0"]
-                 [clojure-future-spec "1.9.0-alpha17"]
+  :dependencies [[org.clojure/clojure "1.9.0"]
                  [clj-time "0.14.2"]
                  [com.datomic/datomic-pro "0.9.5561.62"]
                  [environ "1.1.0"]
-                 [camel-snake-kebab "0.4.0"]]
+                 [camel-snake-kebab "0.4.0"]
+                 [org.clojure/tools.cli "0.3.5"]]
 
   :plugins [[lein-environ "1.1.0"]]
 
   :repositories {"my.datomic.com" {:url "https://my.datomic.com/repo"
                                    :creds :gpg}}
 
+  :aliases {"migrana" ["run" "-m" "migrana.cli/-main"]}
+  
   :min-lein-version "2.6.1"
 
   :main ^:skip-aot migrana.core
 
   :target-path "target/%s"
   
-  :uberjar-name "clj-10kft.jar"
+  :uberjar-name "migrana.jar"
 
   :profiles {:uberjar {:aot :all}})
