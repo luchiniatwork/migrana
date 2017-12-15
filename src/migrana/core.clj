@@ -55,22 +55,41 @@
   (datomic/create-database uri)
   uri)
 
+(defn ^:private evaluate-tx-fn
+  "Evaluates tx-fn and calls it passing conn to it"
+  [conn tx-fn]
+  (println "... evaluating" tx-fn)
+  (try (require (symbol (namespace tx-fn)))
+       ((resolve tx-fn) conn)
+       (catch Throwable t
+         (throw (Throwable. (str "Exception evaluating " tx-fn ": " t))))))
+
+(defn ^:private evaluate-and-concat
+  [c conn tx-fn]
+  (concat c (evaluate-tx-fn conn tx-fn)))
+
+(defn ^:private flatten-tx-data
+  [conn m]
+  (cond-> (or (:tx-data m) [])
+    (:tx-fn m) (evaluate-and-concat conn (:tx-fn m))))
+
 (defn ^:private transact-left-behind-changes
   "Transacts each tx in the txs seq with a migrana meta payload. Each tx is a map with
   the txs in a :tx-data node, a :timestamp node and a full :schema node."
   [conn txs]
   (doseq [tx txs]
-    (let [payload (concat (:tx-data tx)
+    (println "=> Transacting" (:timestamp tx))
+    (let [payload (concat (flatten-tx-data conn tx)
                           [{:migrana/migration :current
                             :migrana/timestamp (:timestamp tx)
-                            :migrana/schema (prn-str (:schema tx))}])]
-      (println "=> Transacting" (:timestamp tx))
+                            :migrana/schema (prn-str (:schema tx))}])] 
       @(datomic/transact conn payload))))
 
 (defn ^:private print-left-behind-changes
   [txs]
   (doseq [tx txs]
-    (println "=> Would transact" (:timestamp tx))))
+    (println "=> Would transact" (:timestamp tx))
+    (if (:tx-fn tx) (println "... would evaluate" (:tx-fn tx) "for" ))))
 
 (defn ^:private new-time-stamp
   "Returns a new time stamp based on local time"
@@ -102,22 +121,20 @@
               (with-out-str
                 (pprint/pprint {:tx-data gap-on-disk
                                 :schema schema-on-disk})))
-        (println "=> New migration created" new-ts "with" (count gap-on-disk) "changes")
+        (println "=> New inferred migration created" new-ts "with" (count gap-on-disk) "changes")
         true)
       false)))
 
 (defn ^:private dryrun-new-inference
-  [txs]
-  (pprint/pprint txs)
-  (pprint/pprint (last txs))
-  (let [{:keys [timestamp schema]} (last txs)
+  [last-tx]
+  (let [{:keys [timestamp schema]} last-tx
         schema-on-disk (-> schema-file io/resource slurp edn/read-string)
         diff (data/diff (set schema-on-disk) (set schema))
         gap-on-disk (vec (first diff))]
     (if (> (count gap-on-disk) 0)
       (do
         (println "=> Schema changes detected")
-        (println "=> Would create inferred migration with" (count gap-on-disk) "changes")
+        (println "=> Would create new inferred migration with" (count gap-on-disk) "changes")
         true)
       false)))
 
@@ -134,71 +151,38 @@
              (.getName %2))
    (.listFiles (io/file migrations-path))))
 
-(defn ^:private evaluate-tx-fn
-  "Evaluates tx-fn and calls it passing conn to it"
-  [conn tx-fn]
-  (println "=> Evaluating" tx-fn)
-  (try (require (symbol (namespace tx-fn)))
-       ((resolve tx-fn) conn)
-       (catch Throwable t
-         (throw (Throwable. (str "Exception evaluating " tx-fn ": " t))))))
+(defn ^:private pre-process-files
+  [files]
+  (reduce (fn [c file]
+            (let [m (-> file slurp edn/read-string)]
+              (conj c {:timestamp (file->ts file)
+                       :tx-data (or (:tx-data m) [])
+                       :tx-fn (:tx-fn m)
+                       :schema (or (:schema m)
+                                   (:schema (last c))
+                                   [])})))
+          []
+          files))
 
-(defn ^:private evaluate-and-concat
-  [c conn tx-fn dryrun]
-  (if dryrun
-    (println "=> Would evaluate" tx-fn)
-    (concat c (evaluate-tx-fn conn tx-fn))))
-
-(defn ^:private flatten-tx-data
-  [conn m dryrun]
-  (cond-> (or (:tx-data m) [])
-    (:tx-fn m) (evaluate-and-concat conn (:tx-fn m) dryrun)))
-
-(defn ^:private process-migration-file
-  [conn file processed-prior dryrun]
-  (println "Processing file" (file->ts file))
-  (let [m (-> file slurp edn/read-string)]
-    {:tx-data (flatten-tx-data conn m dryrun)
-     :timestamp (file->ts file)
-     :schema (or (:schema m)
-                 (:schema processed-prior))}))
-
-(defn ^:private migrations-seq
-  ([conn file rest-files dryrun]
-   (migrations-seq conn file rest-files dryrun nil))
-  ([conn file rest-files dryrun processed-prior]
-   (if file
-     (let [current-file (process-migration-file conn file processed-prior dryrun)]
-       (lazy-seq (cons current-file
-                       (migrations-seq conn
-                                       (first rest-files)
-                                       (rest rest-files)
-                                       dryrun
-                                       current-file)))))))
-
-(defn ^:private reified-migrations
-  "Returns a lazy-seq of migrations that are reified at access"
-  [conn dryrun]
-  (let [files (migration-files)]
-    (migrations-seq conn (first files) (rest files) dryrun)))
-
-(defn ^:private filtered-reified-migrations
+(defn ^:private pre-process-migrations
   "Returns the migrations that still need to be applied to the DB"
-  [conn dryrun]
-  (let [{:keys [migrana/timestamp]} (current-db-info conn)]
-    (filter #(> (compare (:timestamp %) timestamp) 0)
-            (reified-migrations conn dryrun))))
+  [conn]
+  (let [{:keys [migrana/timestamp]} (current-db-info conn)
+        pre-processed-migrations (pre-process-files (migration-files))]
+    {:filtered-migrations (filter #(> (compare (:timestamp %) timestamp) 0)
+                                  pre-processed-migrations)
+     :last-migration (last pre-processed-migrations)}))
 
 (defn ^:private transact-to-latest
   "Transacts the DB to the latest state"
   [conn & args]
   (let [{:keys [dryrun]} (apply hash-map args)
-        left-behind-txs (filtered-reified-migrations conn dryrun)]
-    (pprint/pprint left-behind-txs)
+        pre-processed-migrations (pre-process-migrations conn)
+        left-behind-txs (:filtered-migrations pre-processed-migrations)]
     (if dryrun
       (print-left-behind-changes left-behind-txs)
       (transact-left-behind-changes conn left-behind-txs))
-    left-behind-txs))
+    pre-processed-migrations))
 
 (defn ^:private base-uri-connect
   "Connects to URI, makes sure the DB exists and ensures bsasic migrana
@@ -234,13 +218,19 @@
     (datomic/release conn)))
 
 (defn dry-run
+  "Similar to apply-run but instead of applying the outstanding migrations it prints
+  out what the migrations would do."
   [uri]
   (let [conn (base-uri-connect uri)
         {:keys [migrana/timestamp]} (current-db-info conn)]
     (println "=> DB currently at" (or timestamp "N/A"))
-    (let [left-behind-txs (transact-to-latest conn :dryrun true)]
-      (if (dryrun-new-inference left-behind-txs)
-        (println "=> Would transact inferred schema changes")))
+    (let [last-tx (:last-migration (transact-to-latest conn :dryrun true))]
+      (println "=> Last known migration at" (:timestamp last-tx))
+      (if (dryrun-new-inference last-tx)
+        (println "=> Would transact inferred schema changes"))
+      (if (= timestamp (:timestamp last-tx))
+        (println "=> DB up-to-date!\n")
+        (println "=> DB behind!\n")))
     (datomic/release conn)))
 
 (defn create

@@ -6,7 +6,7 @@
 (def ^:private cli-options
   [["-s" "--schema SCHEMA_FILE" "Schema file (default resources/schema.edn)"
     :id :schema]
-   ["-m" "--migrations MIGRATIONS_PATH" "Migrations path (defatul resources/migrations/)"
+   ["-m" "--migrations MIGRATIONS_PATH" "Migrations path (default resources/migrations/)"
     :id :migrations]
    [nil "--no-inference" "Runs with no schema change inference"
     :id :no-inference
@@ -23,7 +23,6 @@
   (println "  create <name>             Creates new manual migration called <name>")
   (println "  dry-run <uri>             Simulates what `apply` would do")
   (println "  set-db <uri> <timestamp>  Sets the database at <uri> with <timestamp>")
-
   (println "")
   (println "Options for `apply`, `dry-run`, and `set-db` commands:")
   (println "")

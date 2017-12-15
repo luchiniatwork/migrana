@@ -224,25 +224,26 @@ migration will be sent to the DB.
 
 ## Options
 
-$ lein migrana run <uri>
+```
+$ lein migrana run
+Migrana 0.1.0
 
--s --schema
-TBD: how to specify other edn than resources/schema.edn?
+Syntax: lein migrana <command> <options>
 
--m --migrations
-TBD: how to specify a different folder than resources/migrations? - is this
-a good idea?
+Available commands:
 
---no-inference
-TBD: param to run without schema inference
+  apply <uri>               Transacts pending migrations onto database at <uri>
+  info <uri>                Shows current database information
+  create <name>             Creates new manual migration called <name>
+  dry-run <uri>             Simulates what `apply` would do
+  set-db <uri> <timestamp>  Sets the database at <uri> with <timestamp>
 
+Options for `apply`, `dry-run`, and `set-db` commands:
 
-$ lein migrana set-db <uri> <timestamp>
-
-
-$ lein migrana create <name>
-
-
+  -s, --schema SCHEMA_FILE          Schema file (default resources/schema.edn)
+  -m, --migrations MIGRATIONS_PATH  Migrations path (default resources/migrations/)
+      --no-inference                Runs with no schema change inference
+```
 
 ## Bugs
 
