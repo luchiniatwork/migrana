@@ -7,8 +7,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
-            [datomic.api :as datomic]
-            [environ.core :as environ]))
+            [datomic.api :as datomic]))
 
 (def ^:private custom-formatter (format/formatter "yyyyMMddHHmmss"))
 
@@ -38,11 +37,6 @@
   [conn]
   @(datomic/transact conn migrana-schema)
   conn)
-
-(defn ^:private default-uri
-  "If uri is nil, returns the enviornment variable DATOMIC_URI"
-  [uri]
-  (or uri (environ/env :datomic-uri)))
 
 (defn ^:private connect-transactor
   "Uri to connectation"
@@ -191,30 +185,29 @@
   (if-not uri (throw (Throwable. "Must have URI to connect to")))
   (println "=> Connecting to" uri)
   (-> uri
-      default-uri
       ensure-db-exists
       connect-transactor
       ensure-migrana-transactions))
 
-(defn apply-run
+(defn run
   "Connect to the DB, fast forwards it to the latest state in disk, infers new schema
   changes, creates extra migration if needed, and then fast forward to this new state"
   [uri]
   (let [conn (base-uri-connect uri)
         {:keys [migrana/timestamp]} (current-db-info conn)]
-    (println "=> DB currently at" (or timestamp "N/A"))
+    (println "=> DB is currently at" (or timestamp "N/A"))
     (transact-to-latest conn)
     (if (build-new-inference conn)
       (transact-to-latest conn))
     (datomic/release conn)
-    (println "=> DB up-to-date!\n")))
+    (println "=> DB is up-to-date!\n")))
 
 (defn info
   "Simply prints the version of the DB"
   [uri]
   (let [conn (base-uri-connect uri)
         {:keys [migrana/timestamp]} (current-db-info conn)]
-    (println "=> DB currently at" (or timestamp "N/A") "\n")
+    (println "=> DB is currently at" (or timestamp "N/A") "\n")
     (datomic/release conn)))
 
 (defn dry-run
@@ -223,14 +216,14 @@
   [uri]
   (let [conn (base-uri-connect uri)
         {:keys [migrana/timestamp]} (current-db-info conn)]
-    (println "=> DB currently at" (or timestamp "N/A"))
+    (println "=> DB is currently at" (or timestamp "N/A"))
     (let [last-tx (:last-migration (transact-to-latest conn :dryrun true))]
       (println "=> Last known migration at" (:timestamp last-tx))
       (if (dryrun-new-inference last-tx)
         (println "=> Would transact inferred schema changes"))
       (if (= timestamp (:timestamp last-tx))
-        (println "=> DB up-to-date!\n")
-        (println "=> DB behind!\n")))
+        (println "=> DB is up-to-date!\n")
+        (println "=> DB is behind!\n")))
     (datomic/release conn)))
 
 (defn create
@@ -251,8 +244,8 @@
   [uri ts]
   (let [conn (base-uri-connect uri)
         {:keys [migrana/timestamp]} (current-db-info conn)]
-    (println "=> DB currently at" (or timestamp "N/A"))
+    (println "=> DB is currently at" (or timestamp "N/A"))
     @(datomic/transact conn [{:migrana/migration :current
                               :migrana/timestamp ts}])
     (datomic/release conn)
-    (println "=> DB set to" ts "\n")))
+    (println "=> DB now set to" ts "\n")))

@@ -40,7 +40,32 @@ few things need change along the way. Two common scenarios are:
 
 ## Getting Started
 
-TBD
+The recommended approach is to install Migrana as a user-level plugin on your lein
+`profiles.clj` file (`~/.lein/profiles.clj`). This will make Migrana
+plugin is available globally:
+
+```clojure
+{:user {:plugins [[migrana "<version>"]]}}
+```
+
+Then run from anywhere:
+
+```
+$ lein help migrana
+```
+
+Alternatevely you can use Migrana as a project-level plugin putting
+`[migrana "<version>"]` into the `:plugins` vector of your `project.clj`.
+
+Then run from your project root:
+
+```
+$ lein help migrana
+```
+
+Latest Migrana version:
+
+[![Clojars Project](http://clojars.org/migrana/latest-version.svg)](http://clojars.org/migrana)
 
 ## Usage
 
@@ -225,19 +250,24 @@ migration will be sent to the DB.
 ## Options
 
 ```
-$ lein migrana run
-Migrana 0.1.0
+$ lein migrana
+Datomic migration tool.
 
-Syntax: lein migrana <command> <options>
+  Syntax: lein migrana <subtask> <options>
 
-Available commands:
+Subtasks available:
+info      Shows current database information.
+create    Creates new manual migration.
+dry-run   Simulates what `run` would do.
+run       Transacts pending migrations onto database.
+set-db    Sets the database timestamp.
 
-  apply <uri>               Transacts pending migrations onto database at <uri>
-  info <uri>                Shows current database information
-  create <name>             Creates new manual migration called <name>
-  dry-run <uri>             Simulates what `apply` would do
-  set-db <uri> <timestamp>  Sets the database at <uri> with <timestamp>
+Run `lein help migrana $SUBTASK` for subtask details.
+```
 
+For `dry-run`, `run`, and `set-db` you also have:
+
+```
 Options for `apply`, `dry-run`, and `set-db` commands:
 
   -s, --schema SCHEMA_FILE          Schema file (default resources/schema.edn)
@@ -257,6 +287,12 @@ If you are interested in becoming a team member please open an issue.
 
 ## License
 
+```
 Copyright © 2017 Tiago Luchini
 
-Distributed under the MIT License.
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
