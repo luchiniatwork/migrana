@@ -33,8 +33,10 @@ few things need change along the way. Two common scenarios are:
 * [Getting Started](#getting-started)
 * [Usage](#usage)
 * [Schema Inference](#schema-inference)
+* [Dry Running Migrations](#dry-running-migrations)
 * [Manual Migrations](#manual-migrations)
 * [Migrations as Code](#migrations-as-code)
+* [Options](#options)
 * [Bugs](#bugs)
 * [Help!](#help)
 
@@ -87,11 +89,11 @@ Let's assume you have a Datomic schema file on `resources/schema.edn`:
 Then run:
 
 ```
-$ lein migrana datomic:dev://localhost:4334/my-db
+$ lein migrana run datomic:dev://localhost:4334/my-db
 ```
 
 _Note_: If you have the environment variable `DATOMIC_URI` set, you can call
-`lein migrana` and it will connect to the DB specified there.
+`lein migrana run` and it will connect to the DB specified there.
 
 Migrana will make sure that your schema is in the DB and will also create a
 migration for you at `resources/migrations` with the timestamp
@@ -102,7 +104,7 @@ $ ls resources/migrations
 20171124200143_schema_inference.edn
 ```
 
-If you run `lein migrana` again, Migrana will not do anything because it
+If you run `lein migrana run` again, Migrana will not do anything because it
 will detect that the schema file is unchanged and that it has already
 been asserted into the DB.
 
@@ -145,10 +147,10 @@ Let's change our `resources/schema.edn` to:
  {:db/ident :relationship-status/widowed}]]
 ```
 
-After the change we run `lein migrana` again:
+After the change we run `lein migrana run` again:
 
 ```
-$ lein migrana datomic:dev://localhost:4334/my-db
+$ lein migrana run datomic:dev://localhost:4334/my-db
 ```
 
 And let's check what Migrana has done to our `resources/migrations`:
@@ -173,13 +175,23 @@ When you check the content of the new file
 ## Schema Inference
 
 You probably noticed that, until now, the migration files are named 
-`YYYYMMDDHHMMSS_schema_inference.edn`. That's because running `lein migrana`
+`YYYYMMDDHHMMSS_schema_inference.edn`. That's because running `lein migrana run`
 as we have been doing will use its schema inference features (Migrana
 will infer the migration required based on how the Datomic schema file
 has changed).
 
 Migrana can detect only additions (such as we have seen before). Anything
 else more advanced will require a manual migration.
+
+## Dry Running Migrations
+
+For those situations where you don't want to run the migrations but would want to
+verify which migrations would run against your database, you can simply
+run Migrana in the `dry-run` mode:
+
+```
+$ lein migrana dry-run
+```
 
 ## Manual Migrations
 
@@ -217,39 +229,32 @@ Then open the migration created in `resources/migrations` and edit to look
 like something like this:
 
 ```clojure
-{:tx-fn 'my-project.migrations/backport-bar-attr-to-entities-with-foo}
+{:tx-fn 'my-project.migrations/add-suffix-to-all-names}
 ```
 
 Then in your `src/my_project/migrations.clj` you could have:
 
 ```clojure
 (ns my-project.migrations
-  (:require [datomic.api :as d])
+  (:require [datomic.api :as d]))
 
-(def find-eids-with-attr
-  '[:find [?e ...]
-    :in $ ?attr
-    :where
-    [?e ?attr]])
-
-(defn backport-bar-attr-to-entities-with-foo
-  "Find existing entities bearing the `:some/foo` attribute,
-   and apply to them the `:some/bar` attribute and value."
-  [conn]
-  (let [foo-eids (d/q find-eids-with-attr (d/db conn) :some/foo)
-        tx-data  (for [eid foo-eids]
-                   {:db/id eid
-                    :some/bar :bar-value})]
-    tx-data))
+(defn add-suffix-to-all-names [conn]
+  (let [names (d/q '[:find (pull ?e [:db/id :person/name])
+                     :where
+                     [?e :person/name]]
+                   (d/db conn))]
+    (map (fn [n] {:db/id (:db/id (first n))
+                  :person/name (str (:person/name (first n)) "Suffix")})
+         names)))
 ```
 
-After you edit the file, you can run `lein migrana` as usual and your
+After you edit the file, you can run `lein migrana run` as usual and your
 migration will be sent to the DB.
 
 ## Options
 
 ```
-$ lein migrana
+$ lein help migrana
 Datomic migration tool.
 
   Syntax: lein migrana <subtask> <options>
@@ -264,10 +269,11 @@ set-db    Sets the database timestamp.
 Run `lein help migrana $SUBTASK` for subtask details.
 ```
 
-For `dry-run`, `run`, and `set-db` you also have:
+For `dry-run`, `run`, and `set-db` you also have (NOT IMPLEMENTED YET
+[this issue](https://github.com/luchiniatwork/migrana/issues/3):
 
 ```
-Options for `apply`, `dry-run`, and `set-db` commands:
+Options for `run`, `dry-run`, and `set-db` commands:
 
   -s, --schema SCHEMA_FILE          Schema file (default resources/schema.edn)
   -m, --migrations MIGRATIONS_PATH  Migrations path (default resources/migrations/)
