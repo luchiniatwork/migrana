@@ -21,8 +21,8 @@ few things need change along the way. Two common scenarios are:
    beforehand (see [Altering Schema Attributes](http://docs.datomic.com/schema.html#altering-schema-attributes)
    for more details). An example would be for instance setting an attribute
    as `:db/unique`. Since uniqueness will be enforced, then making sure that
-   a separate, intermediary transaction takes care of such conflict cases will
-   guarantee that the new setting gets applied successfully.
+   the transaction takes care of such conflictious cases will
+   guarantee that the new schema setting is applied successfully.
 2. When there are data transformations as part of the migration. An example
    is a hypothetical situation for example where all entities that used to
    have `:card/ratings` attribute now also need a default
@@ -41,8 +41,7 @@ few things need change along the way. Two common scenarios are:
 ## Getting Started
 
 The recommended approach is to install Migrana as a user-level plugin on your lein
-`profiles.clj` file (`~/.lein/profiles.clj`). This will make Migrana
-plugin is available globally:
+`profiles.clj` file (`~/.lein/profiles.clj`). This will make Migrana available globally:
 
 ```clojure
 {:user {:plugins [[migrana "<version>"]]}}
