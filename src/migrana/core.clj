@@ -217,11 +217,16 @@
   (let [conn (base-uri-connect uri)
         {:keys [migrana/timestamp]} (current-db-info conn)]
     (println "=> DB is currently at" (or timestamp "N/A"))
-    (let [last-tx (:last-migration (transact-to-latest conn :dryrun true))]
-      (println "=> Last known migration at" (:timestamp last-tx))
-      (if (dryrun-new-inference last-tx)
+    (let [last-tx (:last-migration (transact-to-latest conn :dryrun true))
+          would-infer? (dryrun-new-inference last-tx)]
+      (println "=> Last known migration at" (or (:timestamp last-tx) "N/A"))
+      (if would-infer?
         (println "=> Would transact inferred schema changes"))
-      (if (= timestamp (:timestamp last-tx))
+      (if (and
+           (= timestamp (:timestamp last-tx))
+           (not (nil? (:timestamp last-tx)))
+           (not (nil? timestamp))
+           (not would-infer?))
         (println "=> DB is up-to-date!\n")
         (println "=> DB is behind!\n")))
     (datomic/release conn)))
