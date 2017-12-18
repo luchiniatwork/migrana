@@ -1,4 +1,4 @@
-(defproject migrana "0.1.0"
+(defproject migrana "0.1.1"
   :description "Migrana is a Datomic migration tool that gives you the control over how your Datomic database evolves."
   :url "https://github.com/luchiniatwork/migrana"
   :license {:name "MIT"

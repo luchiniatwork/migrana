@@ -13,7 +13,7 @@
 
 (def ^:private inference-suffix "_schema_inference.edn")
 
-(def ^:private schema-file "schema.edn")
+(def ^:private schema-path "resources/schema.edn")
 
 (def ^:private migrations-path "resources/migrations/")
 
@@ -103,7 +103,7 @@
   are differences."
   [conn]
   (let [{:keys [migrana/timestamp migrana/schema]} (current-db-info conn)
-        schema-on-disk (-> schema-file io/resource slurp edn/read-string)
+        schema-on-disk (-> schema-path slurp edn/read-string)
         diff (data/diff (set schema-on-disk) (set (edn/read-string schema)))
         gap-on-disk (vec (first diff))]
     (if (> (count gap-on-disk) 0) 
@@ -122,7 +122,7 @@
 (defn ^:private dryrun-new-inference
   [last-tx]
   (let [{:keys [timestamp schema]} last-tx
-        schema-on-disk (-> schema-file io/resource slurp edn/read-string)
+        schema-on-disk (-> schema-path slurp edn/read-string)
         diff (data/diff (set schema-on-disk) (set schema))
         gap-on-disk (vec (first diff))]
     (if (> (count gap-on-disk) 0)
