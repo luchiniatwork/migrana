@@ -7,7 +7,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
-            [datomic.api :as datomic]))
+            [datomic.client.api :as d]))
 
 (def ^:private custom-formatter (format/formatter "yyyyMMddHHmmss"))
 
@@ -32,22 +32,26 @@
     :db/cardinality :db.cardinality/one
     :db/doc "The schema (stringified edn) of the particular migration applied to the DB."}])
 
+(defn ^:private get-client
+  [cfg]
+  (d/client cfg))
+
 (defn ^:private ensure-migrana-transactions
   "Transacts the minimum required migrana schema"
   [conn]
-  @(datomic/transact conn migrana-schema)
+  (d/transact conn {:tx-data migrana-schema})
   conn)
 
 (defn ^:private connect-transactor
   "Uri to connectation"
-  [uri]
-  (datomic/connect uri))
+  [client db-name]
+  (d/connect client {:db-name db-name}))
 
 (defn ^:private ensure-db-exists
   "Creates DB and returns the uri either the DB exists or not"
-  [uri]
-  (datomic/create-database uri)
-  uri)
+  [client db-name]
+  (d/create-database client {:db-name db-name})
+  client)
 
 (defn ^:private evaluate-tx-fn
   "Evaluates tx-fn and calls it passing conn to it"
@@ -77,7 +81,7 @@
                           [{:migrana/migration :current
                             :migrana/timestamp (:timestamp tx)
                             :migrana/schema (prn-str (:schema tx))}])] 
-      @(datomic/transact conn payload))))
+      (d/transact conn {:tx-data payload}))))
 
 (defn ^:private print-left-behind-changes
   [txs]
@@ -94,9 +98,9 @@
 (defn ^:private current-db-info
   "Returns a map with the :migrana/timestamp and :migrana/schema of the DB as of now"
   [conn]
-  (datomic/pull (datomic/db conn)
-                [:migrana/timestamp :migrana/schema]
-                [:migrana/migration :current]))
+  (d/pull (d/db conn)
+          [:migrana/timestamp :migrana/schema]
+          [:migrana/migration :current]))
 
 (defn ^:private build-new-inference
   "Compares the schema in the DB and on disk and creates an inferred migration file if there
@@ -178,43 +182,42 @@
       (transact-left-behind-changes conn left-behind-txs))
     pre-processed-migrations))
 
-(defn ^:private base-uri-connect
+(defn ^:private base-cfg-connect
   "Connects to URI, makes sure the DB exists and ensures bsasic migrana
   schema is in place"
-  [uri]
-  (if-not uri (throw (Throwable. "Must have URI to connect to")))
-  (println "=> Connecting to" uri)
-  (-> uri
-      ensure-db-exists
-      connect-transactor
+  [cfg db-name]
+  (if-not cfg (throw (Throwable. "Must have cfg to connect to")))
+  (println "=> Connecting to system" (:system cfg) "db" db-name)
+  (-> cfg
+      get-client
+      (ensure-db-exists db-name)
+      (connect-transactor db-name)
       ensure-migrana-transactions))
 
 (defn run
   "Connect to the DB, fast forwards it to the latest state in disk, infers new schema
   changes, creates extra migration if needed, and then fast forward to this new state"
-  [uri]
-  (let [conn (base-uri-connect uri)
+  [cfg db-name]
+  (let [conn (base-cfg-connect cfg db-name)
         {:keys [migrana/timestamp]} (current-db-info conn)]
     (println "=> DB is currently at" (or timestamp "N/A"))
     (transact-to-latest conn)
     (if (build-new-inference conn)
       (transact-to-latest conn))
-    (datomic/release conn)
     (println "=> DB is up-to-date!\n")))
 
 (defn info
   "Simply prints the version of the DB"
-  [uri]
-  (let [conn (base-uri-connect uri)
+  [cfg db-name]
+  (let [conn (base-cfg-connect cfg db-name)
         {:keys [migrana/timestamp]} (current-db-info conn)]
-    (println "=> DB is currently at" (or timestamp "N/A") "\n")
-    (datomic/release conn)))
+    (println "=> DB is currently at" (or timestamp "N/A") "\n")))
 
 (defn dry-run
   "Similar to apply-run but instead of applying the outstanding migrations it prints
   out what the migrations would do."
-  [uri]
-  (let [conn (base-uri-connect uri)
+  [cfg db-name]
+  (let [conn (base-cfg-connect cfg db-name)
         {:keys [migrana/timestamp]} (current-db-info conn)]
     (println "=> DB is currently at" (or timestamp "N/A"))
     (let [last-tx (:last-migration (transact-to-latest conn :dryrun true))
@@ -228,8 +231,7 @@
            (not (nil? timestamp))
            (not would-infer?))
         (println "=> DB is up-to-date!\n")
-        (println "=> DB is behind!\n")))
-    (datomic/release conn)))
+        (println "=> DB is behind!\n")))))
 
 (defn create
   "Creates a migration named n"
@@ -237,7 +239,7 @@
   (let [new-ts (new-time-stamp)
         migration-name (str migrations-path new-ts "_"
                             (->snake_case_string n) ".edn")]
-    (.mkdir (io/file migrations-path))
+    (.mkdirs (io/file migrations-path))
     (spit migration-name
           (with-out-str
             (pprint/pprint {:tx-data []})))
@@ -246,11 +248,10 @@
 
 (defn set-db
   "Sets DB timestamp forcefully to ts"
-  [uri ts]
-  (let [conn (base-uri-connect uri)
+  [cfg db-name ts]
+  (let [conn (base-cfg-connect cfg db-name)
         {:keys [migrana/timestamp]} (current-db-info conn)]
     (println "=> DB is currently at" (or timestamp "N/A"))
-    @(datomic/transact conn [{:migrana/migration :current
-                              :migrana/timestamp ts}])
-    (datomic/release conn)
+    (d/transact conn {:tx-data [{:migrana/migration :current
+                                 :migrana/timestamp ts}]})
     (println "=> DB now set to" ts "\n")))

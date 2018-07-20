@@ -1,6 +1,7 @@
 {:deps
- {clj-time {:mvn/version "0.14.2"}
-  environ {:mvn/version "1.1.0"}
-  camel-snake-kebab {:mvn/version "0.4.0"}
-  org.clojure/tools.cli {:mvn/version "0.3.5"}
-  com.datomic/datomic-pro {:mvn/version "0.9.5561.62"}}}
+ {org.clojure/clojure      {:mvn/version "1.9.0"}
+  clj-time                 {:mvn/version "0.14.2"}
+  environ                  {:mvn/version "1.1.0"}
+  camel-snake-kebab        {:mvn/version "0.4.0"}
+  expound                  {:mvn/version "0.7.1"}
+  com.datomic/client-cloud {:mvn/version "0.8.56"}}}
