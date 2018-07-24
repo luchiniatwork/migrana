@@ -12,12 +12,6 @@
 
 (def ^:private custom-formatter (format/formatter "yyyyMMddHHmmss"))
 
-#_(def ^:private inference-suffix "_schema_inference.edn")
-
-#_(def ^:private schema-path "resources/schema.edn")
-
-#_(def ^:private migrations-path "resources/migrations/")
-
 (def ^:private migrana-schema
   [{:db/ident :migrana/migration
     :db/valueType :db.type/keyword
@@ -34,33 +28,39 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn ^:private get-client
+  "Returns a new client out of a cfg or the very client passed through it.
+  Receives a map with Datomic's :cfg or Datomic's :client."
   [{:keys [cfg client]}]
   (if client
     client
     (d/client cfg)))
 
 (defn ^:private ensure-migrana-transactions
-  "Transacts the minimum required migrana schema"
+  "Transacts the minimum required migrana schema."
   [conn]
   (println "... ensuring DB is migrana-ready")
   (d/transact conn {:tx-data migrana-schema})
   conn)
 
 (defn ^:private connect-transactor
+  "Connects to db-name on client."
   [client db-name]
   (d/connect client {:db-name db-name}))
 
 (defn ^:private ensure-db-exists
-  "Creates DB and returns the client regardless of the existence of the DB"
+  "Creates DB and returns the client regardless of the existence of the
+  DB."
   [client db-name]
-  (println "=> Basic ensurances")
+  (println "=> Basic ensurances:")
   (println "... ensuring DB exists")
   (d/create-database client {:db-name db-name})
   client)
 
 (defn ^:private connect
+  "Main connection function. Receives a map with either a Datomic
+  :client or Datomic :cfg, and a :db-name to connect to."
   [{:keys [client cfg db-name] :as opts}]
-  (println "=> Connecting")
+  (println "=> Connection:")
   (if-not (or client cfg) (throw (Throwable. "Must have :cfg or :client to connect to")))
   (if-not db-name (throw (Throwable. "Must have :db-name to connect to")))
   (if client
@@ -74,7 +74,7 @@
       ensure-migrana-transactions))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Transactions for migrations
+;; Migration transaction functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn ^:private evaluate-tx-fn
@@ -96,8 +96,9 @@
     (:tx-fn m) (evaluate-and-concat conn (:tx-fn m))))
 
 (defn ^:private transact-left-behind-changes
-  "Transacts each tx in the txs seq with a migrana meta payload. Each tx is a map with
-  the txs in a :tx-data node, a :timestamp node and a full :schema node."
+  "Transacts each tx in the txs seq with a migrana meta payload. Each tx
+  is a map with the txs in a :tx-data node, a :timestamp node and a
+  schema snapshot at :schema-snapshot."
   [conn txs]
   (doseq [tx txs]
     (println "=> Processing migration" (:timestamp tx))
@@ -111,42 +112,44 @@
       (d/transact conn {:tx-data tx-payload})))
   txs)
 
-#_(defn ^:private print-left-behind-changes
-    [txs]
-    (doseq [tx txs]
-      (println "=> Would transact" (:timestamp tx))
-      (if (:tx-fn tx) (println "... would evaluate" (:tx-fn tx) "for" ))))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Schema and timestamp meta functions 
+;; Schema and timestamp meta functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn ^:private new-time-stamp
-  "Returns a new time stamp based on local time"
+  "Returns a new timestamp based on local time."
   []
   (format/unparse custom-formatter
                   (local/local-now)))
 
 (defn ^:private current-db-info
-  "Returns a map with the :migrana/timestamp and :migrana/schema of the DB as of now"
+  "Returns a map with the :migrana/timestamp and :migrana/schema of the
+  DB as of now."
   [conn]
   (d/pull (d/db conn)
           [:migrana/timestamp :migrana/schema]
           [:migrana/migration :current]))
 
-(defn ^:private db-ident-flattener [ident]
+(defn ^:private db-ident-flattener
+  "Returns a fn that flattens the specified Datomic ident. This is used
+  because Datomic's internal schema returns a lot more metadata than
+  needs to be exposed back to users."
+  [ident]
   #(if (-> % ident :db/ident)
      (update % ident :db/ident)
      %))
 
-(defn ^:private is-user-schema? [m]
-  (not (contains? #{"db" "fressian" "db.excise" "db.alter" "db.install"}
+(defn ^:private is-user-schema?
+  "Returns true if the provided schema map entry is provided by the user or not."
+  [m]
+  (not (contains? #{"db" "migrana" "fressian"
+                    "db.excise" "db.alter" "db.install"}
                   (-> m
                       :db/ident
                       namespace))))
 
 (defn ^:private get-schema
+  "Returns the user-specified schema presently in the DB."
   [conn]
   (->> (d/pull (d/db conn) '{:eid 0 :selector [{:db.install/attribute [*]}]})
        :db.install/attribute
@@ -156,68 +159,33 @@
        (map (db-ident-flattener :db/cardinality))
        (map (db-ident-flattener :db/unique))))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-#_(defn ^:private build-new-inference
-    "Compares the schema in the DB and on disk and creates an inferred migration file if there
-  are differences."
-    [conn]
-    (let [{:keys [migrana/timestamp migrana/schema]} (current-db-info conn)
-          schema-on-disk (-> schema-path slurp edn/read-string)
-          diff (data/diff (set schema-on-disk) (set (edn/read-string schema)))
-          gap-on-disk (vec (first diff))]
-      (if (> (count gap-on-disk) 0) 
-        (let [new-ts (new-time-stamp)
-              migration-name (str migrations-path new-ts inference-suffix)]
-          (println "=> Schema changes detected")
-          (.mkdir (io/file migrations-path))
-          (spit migration-name
-                (with-out-str
-                  (pprint/pprint {:tx-data gap-on-disk
-                                  :schema schema-on-disk})))
-          (println "=> New inferred migration created" new-ts "with" (count gap-on-disk) "changes")
-          true)
-        false)))
-
-#_(defn ^:private dryrun-new-inference
-    [last-tx]
-    (let [{:keys [timestamp schema]} last-tx
-          schema-on-disk (-> schema-path slurp edn/read-string)
-          diff (data/diff (set schema-on-disk) (set schema))
-          gap-on-disk (vec (first diff))]
-      (if (> (count gap-on-disk) 0)
-        (do
-          (println "=> Schema changes detected")
-          (println "=> Would create new inferred migration with" (count gap-on-disk) "changes")
-          true)
-        false)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Migration functions
+;; Migration parsing functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn ^:private file->ts
-  "Returns the timestamp of a migration file"
+  "Returns the timestamp of the specified migration file."
   [file]
   (subs (.getName file) 0 14))
 
 (defn ^:private migration-files
-  "Returns seq with all the migration files in chronological order"
+  "Returns a sorted seq with all the migration files in chronological
+  order."
   [migrations-path]
   (sort
    #(compare (.getName %1)
              (.getName %2))
-   (->> migrations-path
-        io/file
-        file-seq
-        (filter #(.isFile ^java.io.File %))
-        (filter #(string/ends-with? (.getPath ^java.io.File %)
-                                    ".edn")))))
+   (or (->> migrations-path
+            io/file
+            file-seq
+            (filter #(.isFile ^java.io.File %))
+            (filter #(string/ends-with? (.getPath ^java.io.File %)
+                                        ".edn")))
+       [])))
 
 (defn ^:private pre-process-files
+  "Returns a seq with maps of all the migration transactions in the
+  provided files."
   [files]
   (reduce (fn [c file]
             (let [m (-> file slurp edn/read-string)]
@@ -229,14 +197,14 @@
           files))
 
 (defn ^:private pre-process-migrations
-  "Returns the migrations that still need to be applied to the DB"
+  "Returns the migrations that still need to be applied to the DB.
+  Receives a map with connection details and a :migrations-path"
   [conn {:keys [migrations-path]}]
-  (let [{:keys [migrana/timestamp]} (current-db-info conn)
-        pre-processed-migrations (-> migrations-path
-                                     migration-files
-                                     pre-process-files)]
-    (filter #(> (compare (:timestamp %) timestamp) 0)
-            pre-processed-migrations)))
+  (let [{:keys [migrana/timestamp]} (current-db-info conn)]
+    (->> migrations-path
+         migration-files
+         (filter #(> (compare (file->ts %) timestamp)))
+         pre-process-files)))
 
 (defn ^:private transact-to-latest
   "Transacts the DB to the latest state"
@@ -246,84 +214,71 @@
      conn
      pre-processed-migrations)))
 
-#_(defn run
-    "Connect to the DB, fast forwards it to the latest state in disk, infers new schema
-  changes, creates extra migration if needed, and then fast forward to this new state"
-    [cfg db-name]
-    (let [conn (base-cfg-connect cfg db-name)
-          {:keys [migrana/timestamp]} (current-db-info conn)]
-      (println "=> DB is currently at" (or timestamp "N/A"))
-      (transact-to-latest conn)
-      (if (build-new-inference conn)
-        (transact-to-latest conn))
-      (println "=> DB is up-to-date!\n")))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Public facing functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-#_(defn info
-    "Simply prints the version of the DB"
-    [cfg db-name]
-    (let [conn (base-cfg-connect cfg db-name)
-          {:keys [migrana/timestamp]} (current-db-info conn)]
-      (println "=> DB is currently at" (or timestamp "N/A") "\n")))
-
-#_(defn dry-run
-    "Similar to apply-run but instead of applying the outstanding migrations it prints
-  out what the migrations would do."
-    [cfg db-name]
-    (let [conn (base-cfg-connect cfg db-name)
-          {:keys [migrana/timestamp]} (current-db-info conn)]
-      (println "=> DB is currently at" (or timestamp "N/A"))
-      (let [last-tx (:last-migration (transact-to-latest conn :dryrun true))
-            would-infer? (dryrun-new-inference last-tx)]
-        (println "=> Last known migration at" (or (:timestamp last-tx) "N/A"))
-        (if would-infer?
-          (println "=> Would transact inferred schema changes"))
-        (if (and
-             (= timestamp (:timestamp last-tx))
-             (not (nil? (:timestamp last-tx)))
-             (not (nil? timestamp))
-             (not would-infer?))
-          (println "=> DB is up-to-date!\n")
-          (println "=> DB is behind!\n")))))
+(defn info
+  "Simply returns the version of the DB or 'N/A'. Receives a map with
+  either Datomic's :cfg or Datomic :client and a :db-name. Will create
+  DB if one doesn't exist."
+  [opts]
+  (let [conn (connect opts)
+        {:keys [migrana/timestamp]} (current-db-info conn)
+        ts (or timestamp "N/A")]
+    (println "=> DB is currently at" ts "\n")
+    ts))
 
 (defn create
-  "Creates a migration named n"
+  "Creates a migration named :name in the specified :migrations-path.
+  Besides those two entries, the map also needs either Datomic's :cfg
+  or Datomic :client and a :db-name. Will create DB if one doesn't
+  exist."
   [{:keys [name migrations-path] :as opts}]
+  (.mkdirs (io/file migrations-path))
   (let [conn (connect opts)
         new-ts (new-time-stamp)
-        migration-name (str migrations-path new-ts "_"
-                            (->snake_case_string name) ".edn")]
-    (.mkdirs (io/file migrations-path))
-    (spit migration-name
+        migration (io/file migrations-path
+                           (str new-ts "_"
+                                (->snake_case_string name) ".edn"))
+        snapshot (get-schema conn)] 
+    (println "=> Getting schema snapshot at" new-ts)
+    (spit migration
           (with-out-str
             (pprint/pprint {:tx-data []
-                            :schema-snapshot (get-schema conn)})))
-    (println "=> Migration created" new-ts "at" migration-name "\n")
+                            :schema-snapshot snapshot})))
+    (println "=> Migration file created:" (.getPath migration) "\n")
+    (println "Edit this file with your migrations. Put them in the :tx-data vector.\n")
+    (.getPath migration)))
+
+(defn set-db
+  "Sets the DB timestamp forcefully to :timestamp. Besides this,
+  the map also needs either Datomic's :cfg or Datomic :client and
+  a :db-name. Will create DB if one doesn't exist."
+  [{:keys [timestamp] :as opts}]
+  (let [conn (connect opts)
+        {:keys [migrana/timestamp]} (current-db-info conn)
+        ts (or timestamp "N/A")]
+    (println "=> DB is currently at" ts)
+    (d/transact conn {:tx-data [{:migrana/migration :current
+                                 :migrana/timestamp ts}]})
+    (println "=> DB now forcefully set to" timestamp "\n")
+    (println "You can now attemp an ensure-db again.\n")
     true))
 
-#_(defn set-db
-    "Sets DB timestamp forcefully to ts"
-    [cfg db-name ts]
-    (let [conn (base-cfg-connect cfg db-name)
-          {:keys [migrana/timestamp]} (current-db-info conn)]
-      (println "=> DB is currently at" (or timestamp "N/A"))
-      (d/transact conn {:tx-data [{:migrana/migration :current
-                                   :migrana/timestamp ts}]})
-      (println "=> DB now set to" ts "\n")))
-
 (defn ensure-db
+  "Ensures DB is in operational mode by running all migrations and
+  applying the provided :schema. Besides this, the map also needs
+  either Datomic's :cfg or Datomic :clien, a :db-name, and a
+  :migrations-path. Will create DB if one doesn't exist."
   [{:keys [db-name schema] :as opts}]
   (let [conn (connect opts)
         {:keys [migrana/timestamp]} (current-db-info conn)]
     (println "=> DB is currently at" (or timestamp "N/A"))
-    ;;TODO: 1) load migrations,
-    ;;2) if there are, enter loop,
-    ;;3) apply snapshot, then migration transaction
-    ;;4) then schema
-    ;;Attention: surround with try with instructions to create migration
+    ;;TODO: surround with try with instructions to create migration
     (transact-to-latest conn opts)
-    #_(if (build-new-inference conn)
-        (transact-to-latest conn))
     (println "=> Transacing latest schema")
     (d/transact conn {:tx-data schema})
-    (println "=> DB is up-to-date!\n")
+    (println "=> DB is up-to-date\n")
+    (println "Your DB is ready for use.\n")
     true))
