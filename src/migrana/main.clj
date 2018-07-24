@@ -9,24 +9,21 @@
             [migrana.core :as core]
             [migrana.shared-specs]))
 
-(s/def ::op #{'info 'create 'dry-run 'run 'set-db})
-(s/def ::name string?)
-(s/def ::db-name string?)
-
-;;FIXME: regex here
-(s/def ::timestamp string?)
+(s/def ::op #{'info-db 'ensure-db 'set-db 'create-migration})
+(s/def ::migration-name string?)
+(s/def ::migrations-path string?)
+(s/def ::schema-file string?)
 
 (defmulti operation :op)
-(defmethod operation 'info [_]
+(defmethod operation 'info-db [_]
   (s/keys :req-un [::op :migrana-shared/cfg ::db-name]))
-(defmethod operation 'create [_]
-  (s/keys :req-un [::op ::name]))
-(defmethod operation 'dry-run [_]
-  (s/keys :req-un [::op :migrana-shared/cfg ::db-name]))
-(defmethod operation 'run [_]
-  (s/keys :req-un [::op :migrana-shared/cfg ::db-name]))
+(defmethod operation 'ensure-db [_]
+  (s/keys :req-un [::op :migrana-shared/cfg ::db-name
+                   ::schema-file ::migrations-path]))
 (defmethod operation 'set-db [_]
   (s/keys :req-un [::op :migrana-shared/cfg ::db-name ::timestamp]))
+(defmethod operation 'create-migration [_]
+  (s/keys :req-un [::op ::migration-name ::migrations-path]))
 
 (s/def ::payload (s/and #(not (nil? %))
                         #(s/valid? ::op (:op %))
@@ -34,7 +31,7 @@
 
 (expound/defmsg
   ::payload
-  "required EDN map with key :op being one of info, create, dry-run, run, or set-db")
+  "required EDN map with key :op being one of info-db, ensure-db, set-db, or create-migration")
 
 (def ^:dynamic *in-repl* false)
 
@@ -55,34 +52,42 @@
     [false (expound/expound-str ::payload payload)]
     [true payload]))
 
-(defn ^:private parse-cfg [{:keys [cfg] :as payload}]
-  (if (string? cfg)
-    (assoc payload :cfg (-> cfg io/file slurp edn/read-string))
-    payload))
+(defn ^:private ensure-map [file-path-or-map]
+  (if (string? file-path-or-map)
+    (-> file-path-or-map io/file slurp edn/read-string)
+    file-path-or-map))
+
+(defn ^:private parse-opts
+  [{:keys [cfg db-name migration-name
+           migrations-path schema-file
+           timestamp]}]
+  (cond-> {}
+    cfg (assoc :cfg (ensure-map cfg))
+    db-name (assoc :db-name db-name)
+    migration-name (assoc :migration-name migration-name)
+    migrations-path (assoc :migrations-path migrations-path)
+    schema-file (assoc :schema (ensure-map schema-file))
+    timestamp (assoc :timestamp timestamp)))
 
 (defmulti process (fn [{:keys [op]}] op))
 
-(defmethod process 'info [{:keys [cfg db-name]}]
-  (core/info cfg db-name))
+(defmethod process 'info-db [opts]
+  (core/info-db (parse-opts opts)))
 
-(defmethod process 'create [{:keys [name]}]
-  (core/create name))
+(defmethod process 'ensure-db [opts]
+  (core/ensure-db (parse-opts opts)))
 
-(defmethod process 'dry-run [{:keys [cfg db-name]}]
-  (core/dry-run cfg db-name))
+(defmethod process 'set-db [opts]
+  (core/set-db (parse-opts opts)))
 
-(defmethod process 'run [{:keys [cfg db-name]}]
-  (core/run cfg db-name))
-
-(defmethod process 'set-db [{:keys [cfg db-name timestamp]}]
-  (core/set-db cfg db-name timestamp))
-
+(defmethod process 'create-migration [opts]
+  (core/create-migration (parse-opts opts)))
 
 (defn -main
   [& args]
-  (let [payload (->> args (string/join " ") edn/read-string parse-cfg)
+  (let [payload (->> args (string/join " ") edn/read-string)
         [valid? msg] (check-payload payload)]
-    (if valid?
-      (do (process (-> payload parse-cfg))
+    (if valid? 
+      (do (process payload)
           (exit 0))
       (error msg))))

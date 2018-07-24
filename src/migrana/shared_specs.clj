@@ -32,4 +32,4 @@
 
 (s/def ::db-name string?)
 
-(s/def ::timestamp #"[0-9]{14,14}")
+(s/def ::timestamp #(re-matches #"[0-9]{14,14}" %))

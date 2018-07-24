@@ -38,13 +38,14 @@
 
 (s/def ::client (instance-of "datomic.client.api.sync.Client"))
 
-(s/def ::connect (s/and ::client-or-cfg
-                        :migrana.shared-specs/db-name))
+(s/def ::connect (s/keys :req-un [:migrana.shared-specs/db-name]
+                         :opt-un [::client
+                                  :migrana.shared-specs/cfg]))
 
-(s/def ::connect (s/and
-                  (s/or :client (s/keys :req-un [::client])
-                        :cfg (s/keys :req-un [:migrana.shared-specs/cfg]))
-                  (s/keys :req-un [:migrana.shared-specs/db-name])))
+#_(s/def ::connect (s/and
+                    (s/or :client (s/keys :req-un [::client])
+                          :cfg (s/keys :req-un [:migrana.shared-specs/cfg]))
+                    (s/keys :req-un [:migrana.shared-specs/db-name])))
 
 (s/def ::migrations-path (s/or :string string?
                                :resource (instance-of "java.net.URL")))
@@ -53,23 +54,18 @@
 
 (s/def ::schema seqable?)
 
-(s/def ::opts-info (s/and #(not (nil? %))
-                          ::connect))
+(s/def ::opts-info ::connect)
 
-(s/def ::opts-set-db (s/and #(not (nil? %))
-                            ::connect
-                            (s/keys :req-un [:migrana.shared-specs/timestamp])))
+(s/def ::opts-set-db (s/merge ::connect
+                              (s/keys :req-un [:migrana.shared-specs/timestamp])))
 
-(s/def ::opts-create (s/and #(not (nil? %))
-                            ::connect
-                            (s/keys :req-un [::migration-name
-                                             ::migrations-path])))
+(s/def ::opts-create (s/merge ::connect
+                              (s/keys :req-un [::migration-name
+                                               ::migrations-path])))
 
-(s/def ::opts-ensure-db (s/and #(not (nil? %))
-                               ::connect
-                               (s/keys :req-un [::migration-name
-                                                ::migrations-path
-                                                ::schema])))
+(s/def ::opts-ensure-db (s/merge ::connect
+                                 (s/keys :req-un [::migrations-path
+                                                  ::schema])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Connecting functions
@@ -154,9 +150,7 @@
           tx-payload (concat (flatten-tx-data conn tx)
                              [{:migrana/migration :current
                                :migrana/timestamp (:timestamp tx)}])]
-      (println "... equalizing schema snapshot at that point")
       (d/transact conn {:tx-data tx-snapshot})
-      (println "... transacting migration itself")
       (d/transact conn {:tx-data tx-payload})))
   txs)
 
@@ -251,7 +245,7 @@
   (let [{:keys [migrana/timestamp]} (current-db-info conn)]
     (->> migrations-path
          migration-files
-         (filter #(> (compare (file->ts %) timestamp)))
+         (filter #(> (compare (file->ts %) timestamp) 0))
          pre-process-files)))
 
 (defn ^:private transact-to-latest
@@ -266,7 +260,7 @@
 ;; Public facing functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn info
+(defn info-db
   "Simply returns the version of the DB or 'N/A'. Receives a map with
   either Datomic's :cfg or Datomic :client and a :db-name. Will create
   DB if one doesn't exist."
@@ -278,30 +272,6 @@
         ts (or timestamp "N/A")]
     (println "=> DB is currently at" ts "\n")
     ts))
-
-(defn create
-  "Creates a migration named :name in the specified :migrations-path.
-  Besides those two entries, the map also needs either Datomic's :cfg
-  or Datomic :client and a :db-name. Will create DB if one doesn't
-  exist."
-  [{:keys [migration-name migrations-path] :as opts}]
-  (if (not (s/valid? ::opts-create opts))
-    (throw (ex-info "Invalid opts" {:reason (expound/expound-str ::opts-create opts)})))
-  (.mkdirs (io/file migrations-path))
-  (let [conn (connect opts)
-        new-ts (new-time-stamp)
-        migration (io/file migrations-path
-                           (str new-ts "_"
-                                (->snake_case_string migration-name) ".edn"))
-        snapshot (get-schema conn)] 
-    (println "=> Getting schema snapshot at" new-ts)
-    (spit migration
-          (with-out-str
-            (pprint/pprint {:tx-data []
-                            :schema-snapshot snapshot})))
-    (println "=> Migration file created:" (.getPath migration) "\n")
-    (println "Edit this file with your migrations. Put them in the :tx-data vector.\n")
-    (.getPath migration)))
 
 (defn set-db
   "Sets the DB timestamp forcefully to :timestamp. Besides this,
@@ -333,8 +303,31 @@
     (println "=> DB is currently at" (or timestamp "N/A"))
     ;;TODO: surround with try with instructions to create migration
     (transact-to-latest conn opts)
-    (println "=> Transacing latest schema")
     (d/transact conn {:tx-data schema})
     (println "=> DB is up-to-date\n")
     (println "Your DB is ready for use.\n")
     true))
+
+(defn create-migration
+  "Creates a migration named :name in the specified :migrations-path.
+  Besides those two entries, the map also needs either Datomic's :cfg
+  or Datomic :client and a :db-name. Will create DB if one doesn't
+  exist."
+  [{:keys [migration-name migrations-path] :as opts}]
+  (if (not (s/valid? ::opts-create opts))
+    (throw (ex-info "Invalid opts" {:reason (expound/expound-str ::opts-create opts)})))
+  (.mkdirs (io/file migrations-path))
+  (let [conn (connect opts)
+        new-ts (new-time-stamp)
+        migration (io/file migrations-path
+                           (str new-ts "_"
+                                (->snake_case_string migration-name) ".edn"))
+        snapshot (get-schema conn)] 
+    (println "=> Getting schema snapshot at" new-ts)
+    (spit migration
+          (with-out-str
+            (pprint/pprint {:tx-data []
+                            :schema-snapshot snapshot})))
+    (println "=> Migration file created:" (.getPath migration) "\n")
+    (println "Edit this file with your migrations. Put them in the :tx-data vector.\n")
+    (.getPath migration)))
