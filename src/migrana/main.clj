@@ -6,58 +6,35 @@
             [clojure.string :as string]
             [environ.core :as environ]
             [expound.alpha :as expound]
-            [migrana.core :as core]))
+            [migrana.core :as core]
+            [migrana.shared-specs]))
 
 (s/def ::op #{'info 'create 'dry-run 'run 'set-db})
-
-(s/def ::server-type #{:ion})
-(s/def ::region #{"us-east-1"
-                  "us-east-2"
-                  "us-west-1"
-                  "us-west-2"
-                  "ca-central-1"
-                  "eu-central-1"
-                  "eu-west-1"
-                  "eu-west-2"
-                  "eu-west-3"
-                  "ap-northeast-1"
-                  "ap-northeast-2"
-                  "ap-northeast-3"
-                  "ap-southeast-1"
-                  "ap-southeast-2"
-                  "ap-south-1"
-                  "sa-east-1"})
-(s/def ::system string?)
-(s/def ::query-group string?)
-(s/def ::endpoint string?)
-(s/def ::proxy-port integer?)
-
-(s/def ::cfg (s/keys :req-un [::server-type
-                              ::region
-                              ::system
-                              ::query-group
-                              ::endpoint
-                              ::proxy-port]))
-
 (s/def ::name string?)
-
 (s/def ::db-name string?)
 
 ;;FIXME: regex here
 (s/def ::timestamp string?)
 
 (defmulti operation :op)
-(defmethod operation 'info [_] (s/keys :req-un [::op ::cfg ::db-name]))
-(defmethod operation 'create [_] (s/keys :req-un [::op ::name]))
-(defmethod operation 'dry-run [_] (s/keys :req-un [::op ::cfg ::db-name]))
-(defmethod operation 'run [_] (s/keys :req-un [::op ::cfg ::db-name]))
-(defmethod operation 'set-db [_] (s/keys :req-un [::op ::cfg ::db-name ::timestamp]))
+(defmethod operation 'info [_]
+  (s/keys :req-un [::op :migrana-shared/cfg ::db-name]))
+(defmethod operation 'create [_]
+  (s/keys :req-un [::op ::name]))
+(defmethod operation 'dry-run [_]
+  (s/keys :req-un [::op :migrana-shared/cfg ::db-name]))
+(defmethod operation 'run [_]
+  (s/keys :req-un [::op :migrana-shared/cfg ::db-name]))
+(defmethod operation 'set-db [_]
+  (s/keys :req-un [::op :migrana-shared/cfg ::db-name ::timestamp]))
 
 (s/def ::payload (s/and #(not (nil? %))
                         #(s/valid? ::op (:op %))
                         (s/multi-spec operation ::op)))
 
-(expound/defmsg ::payload "required EDN map with key :op being one of info, create, dry-run, run, or set-db")
+(expound/defmsg
+  ::payload
+  "required EDN map with key :op being one of info, create, dry-run, run, or set-db")
 
 (def ^:dynamic *in-repl* false)
 

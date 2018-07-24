@@ -4,11 +4,14 @@
             [clj-time.format :as format]
             [clj-time.local :as local]
             [clojure.data :as data]
-            [clojure.string :as string]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
-            [datomic.client.api :as d]))
+            [clojure.spec.alpha :as s]
+            [clojure.string :as string]
+            [datomic.client.api :as d]
+            [expound.alpha :as expound]
+            [migrana.shared-specs]))
 
 (def ^:private custom-formatter (format/formatter "yyyyMMddHHmmss"))
 
@@ -22,6 +25,51 @@
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one
     :db/doc "The timestamp identifier of the particular migration applied to the DB."}])
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Specs
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn ^:private instance-of
+  [class-str]
+  #(and (not (nil? %))
+        (= class-str
+           (.getCanonicalName ^java.lang.Class (class %)))))
+
+(s/def ::client (instance-of "datomic.client.api.sync.Client"))
+
+(s/def ::connect (s/and ::client-or-cfg
+                        :migrana.shared-specs/db-name))
+
+(s/def ::connect (s/and
+                  (s/or :client (s/keys :req-un [::client])
+                        :cfg (s/keys :req-un [:migrana.shared-specs/cfg]))
+                  (s/keys :req-un [:migrana.shared-specs/db-name])))
+
+(s/def ::migrations-path (s/or :string string?
+                               :resource (instance-of "java.net.URL")))
+
+(s/def ::migration-name string?)
+
+(s/def ::schema seqable?)
+
+(s/def ::opts-info (s/and #(not (nil? %))
+                          ::connect))
+
+(s/def ::opts-set-db (s/and #(not (nil? %))
+                            ::connect
+                            (s/keys :req-un [:migrana.shared-specs/timestamp])))
+
+(s/def ::opts-create (s/and #(not (nil? %))
+                            ::connect
+                            (s/keys :req-un [::migration-name
+                                             ::migrations-path])))
+
+(s/def ::opts-ensure-db (s/and #(not (nil? %))
+                               ::connect
+                               (s/keys :req-un [::migration-name
+                                                ::migrations-path
+                                                ::schema])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Connecting functions
@@ -223,6 +271,8 @@
   either Datomic's :cfg or Datomic :client and a :db-name. Will create
   DB if one doesn't exist."
   [opts]
+  (if (not (s/valid? ::opts-info opts))
+    (throw (ex-info "Invalid opts" {:reason (expound/expound-str ::opts-info opts)})))
   (let [conn (connect opts)
         {:keys [migrana/timestamp]} (current-db-info conn)
         ts (or timestamp "N/A")]
@@ -234,13 +284,15 @@
   Besides those two entries, the map also needs either Datomic's :cfg
   or Datomic :client and a :db-name. Will create DB if one doesn't
   exist."
-  [{:keys [name migrations-path] :as opts}]
+  [{:keys [migration-name migrations-path] :as opts}]
+  (if (not (s/valid? ::opts-create opts))
+    (throw (ex-info "Invalid opts" {:reason (expound/expound-str ::opts-create opts)})))
   (.mkdirs (io/file migrations-path))
   (let [conn (connect opts)
         new-ts (new-time-stamp)
         migration (io/file migrations-path
                            (str new-ts "_"
-                                (->snake_case_string name) ".edn"))
+                                (->snake_case_string migration-name) ".edn"))
         snapshot (get-schema conn)] 
     (println "=> Getting schema snapshot at" new-ts)
     (spit migration
@@ -256,6 +308,8 @@
   the map also needs either Datomic's :cfg or Datomic :client and
   a :db-name. Will create DB if one doesn't exist."
   [{:keys [timestamp] :as opts}]
+  (if (not (s/valid? ::opts-set-db opts))
+    (throw (ex-info "Invalid opts" {:reason (expound/expound-str ::opts-set-db opts)})))
   (let [conn (connect opts)
         {:keys [migrana/timestamp]} (current-db-info conn)
         ts (or timestamp "N/A")]
@@ -272,6 +326,8 @@
   either Datomic's :cfg or Datomic :clien, a :db-name, and a
   :migrations-path. Will create DB if one doesn't exist."
   [{:keys [db-name schema] :as opts}]
+  (if (not (s/valid? ::opts-ensure-db opts))
+    (throw (ex-info "Invalid opts" {:reason (expound/expound-str ::opts-ensure-db opts)})))
   (let [conn (connect opts)
         {:keys [migrana/timestamp]} (current-db-info conn)]
     (println "=> DB is currently at" (or timestamp "N/A"))
